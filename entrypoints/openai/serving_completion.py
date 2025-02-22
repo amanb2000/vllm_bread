@@ -6,6 +6,7 @@ from typing import AsyncGenerator, AsyncIterator, Dict, List, Optional
 from typing import Sequence as GenericSequence
 from typing import Tuple, Union, cast
 
+from filelock import FileLock
 from fastapi import Request
 
 from vllm.config import ModelConfig
@@ -80,6 +81,9 @@ class OpenAIServingCompletion(OpenAIServing):
         # success status before we actually start generating text :).
         if self.engine_client.errored:
             raise self.engine_client.dead_error
+
+        with self.engine_client.engine_entrance_lock:
+            logger.debug("[srvCmp80] Acquired engine entrance lock, good to do completion...")
 
         # Return error for unsupported features.
         if request.suffix is not None:

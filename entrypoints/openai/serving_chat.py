@@ -135,6 +135,9 @@ class OpenAIServingChat(OpenAIServing):
         if self.engine_client.errored:
             raise self.engine_client.dead_error
 
+        with self.engine_client.engine_entrance_lock:
+            logger.debug("[srvCmp139] Acquired engine entrance lock, good to do CHAT completion...")
+
         try:
             (
                 lora_request,
