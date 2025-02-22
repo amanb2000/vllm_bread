@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import pickle
 import signal
 from contextlib import contextmanager
 from typing import Iterator, List, Optional, Union
+import queue
 
 import cloudpickle
 import zmq
@@ -185,6 +187,7 @@ class MQLLMEngine:
         """Core busy loop of the LLMEngine."""
 
         while True:
+            # check if there are any load_model requests
             if not self.engine.has_unfinished_requests():
                 # Poll until there is work to do.
                 while self.input_socket.poll(timeout=POLLING_TIMEOUT_MS) == 0:
@@ -195,14 +198,33 @@ class MQLLMEngine:
                     logger.debug("Waiting for new requests in engine loop.")
 
             # Handle any input from the client.
-            self.handle_new_input()
+            load_req_maybe = self.handle_new_input()
 
-            # Engine step.
-            request_outputs = self.engine_step()
+            if load_req_maybe is not None: 
+                logger.info(f"[eng215] Load request found in engine loop at line 215 in engine.py.")
+                # this means we need to do engine steps until 
+                # we can't anymore, then we can process the 
+                # load_request that was waiting
+                cnt = 0
+                while self.engine.has_unfinished_requests() and cnt < 1000000:
+                    logger.info(f"[eng221] Engine step {cnt} in engine loop at line 221 in engine.py.")
+                    request_outputs = self.engine_step()
 
-            # Send request outputs (if async, done in engine_step callback).
-            if not self.use_async_sockets:
-                self._send_outputs(request_outputs)
+                    # Send request outputs (if async, done in engine_step callback).
+                    if not self.use_async_sockets:
+                        self._send_outputs(request_outputs)
+                    cnt += 1
+                if cnt == 1000: 
+                    logger.warning("Engine loop reached 1000 steps without finishing all requests.")
+                logger.info(f"[eng230] Processing load request in engine loop at line 227 in engine.py.")
+                self._handle_load_adapter_request(load_req_maybe)
+            else: 
+                # Engine step.
+                request_outputs = self.engine_step()
+
+                # Send request outputs (if async, done in engine_step callback).
+                if not self.use_async_sockets:
+                    self._send_outputs(request_outputs)
 
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""
@@ -240,7 +262,8 @@ class MQLLMEngine:
                     else:
                         self.stop_profile()
                 elif isinstance(request, RPCLoadAdapterRequest):
-                    self._handle_load_adapter_request(request)
+                    # self._handle_load_adapter_request(request)
+                    return request
                 elif isinstance(request, RPCResetPrefixCacheRequest):
                     self.reset_prefix_cache()
                 elif isinstance(request, RPCSleepRequest):
@@ -298,6 +321,7 @@ class MQLLMEngine:
             logger.info("Aborted request %s.", request.request_id)
 
     def _handle_load_adapter_request(self, request: RPCLoadAdapterRequest):
+        logger.info(f"[319eng] Loading adapter: {request.lora_request} at line 319 in engine.py -- _handle_load_adapter_request, after decoding from socket.")
         try:
             self.engine.add_lora(request.lora_request)
         except BaseException as e:
