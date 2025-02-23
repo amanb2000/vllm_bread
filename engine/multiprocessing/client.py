@@ -6,7 +6,7 @@ import pickle
 from contextlib import contextmanager, suppress
 from typing import (Any, AsyncGenerator, Dict, Iterator, List, Mapping,
                     Optional, Union, cast, overload)
-
+from filelock import FileLock
 import cloudpickle
 import psutil
 import zmq
@@ -90,6 +90,7 @@ class MQLLMEngineClient(EngineClient):
                  engine_pid: int):
         self.context = zmq.asyncio.Context()
         self._errored_with: Optional[BaseException] = None
+        self.engine_entrance_lock = FileLock("/tmp/vllm_entrance.lock")
 
         # Get the configs.
         self.model_config = engine_config.model_config
@@ -699,6 +700,7 @@ class MQLLMEngineClient(EngineClient):
     async def add_lora(self, lora_request: LoRARequest) -> None:
         """Load a new LoRA adapter into the engine for future requests."""
         # Uses the same I/O as generate requests
+        logger.info(f"[cli702] add_lora in client.py:MQLLMEngineClient.add_lora, called from handler.")
         request = RPCLoadAdapterRequest(lora_request)
 
         # Create output queue for this requests.
