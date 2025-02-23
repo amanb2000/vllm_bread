@@ -158,6 +158,9 @@ class OpenAIServingModels:
         # Validate that the adapter can be loaded into the engine
         # This will also pre-load it for incoming requests
         try:
+            # with self.engine_client.entry_lock:
+            logger.info('A24H98B adding LoRA in serving_models.py line 162.')
+            logger.info(f'OpenAIServingModels.engine_client type: {type(self.engine_client)}')
             await self.engine_client.add_lora(lora_request)
         except BaseException as e:
             error_type = "BadRequestError"
