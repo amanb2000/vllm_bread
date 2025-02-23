@@ -6,6 +6,7 @@ import signal
 from contextlib import contextmanager
 from typing import Iterator, List, Optional, Union
 import queue
+from filelock import FileLock
 
 import cloudpickle
 import zmq
@@ -74,6 +75,8 @@ class MQLLMEngine:
         # output is immediately pickled and send over the socket, which frees
         # the python object to be reused again.
         kwargs['use_cached_outputs'] = True
+
+        self.entrance_lock = FileLock("/tmp/vllm_entrance.lock")
 
         self.engine = LLMEngine(*args, **kwargs)
         self.log_requests = log_requests
@@ -206,18 +209,19 @@ class MQLLMEngine:
                 # we can't anymore, then we can process the 
                 # load_request that was waiting
                 cnt = 0
-                while self.engine.has_unfinished_requests() and cnt < 1000000:
-                    logger.info(f"[eng221] Engine step {cnt} in engine loop at line 221 in engine.py.")
-                    request_outputs = self.engine_step()
+                with self.entrance_lock:
+                    while self.engine.has_unfinished_requests() and cnt < 1000000:
+                        logger.info(f"[eng221] Engine step {cnt} in engine loop at line 221 in engine.py.")
+                        request_outputs = self.engine_step()
 
-                    # Send request outputs (if async, done in engine_step callback).
-                    if not self.use_async_sockets:
-                        self._send_outputs(request_outputs)
-                    cnt += 1
-                if cnt == 1000: 
-                    logger.warning("Engine loop reached 1000 steps without finishing all requests.")
-                logger.info(f"[eng230] Processing load request in engine loop at line 227 in engine.py.")
-                self._handle_load_adapter_request(load_req_maybe)
+                        # Send request outputs (if async, done in engine_step callback).
+                        if not self.use_async_sockets:
+                            self._send_outputs(request_outputs)
+                        cnt += 1
+                    if cnt == 1000: 
+                        logger.warning("Engine loop reached 1000 steps without finishing all requests.")
+                    logger.info(f"[eng230] Processing load request in engine loop at line 227 in engine.py.")
+                    self._handle_load_adapter_request(load_req_maybe)
             else: 
                 # Engine step.
                 request_outputs = self.engine_step()
@@ -244,8 +248,11 @@ class MQLLMEngine:
         """Handle new input from the socket"""
         try:
             while self.input_socket.poll(timeout=0) != 0:
+                with self.entrance_lock:
+                    logger.info(f"[eng254] TEMP GRAB LOCK!")
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
+
 
                 if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
